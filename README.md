@@ -1,1 +1,305 @@
-# Silo-
+
+<!DOCTYPE html>
+<!--
+  g19_idea_3.html - ไซโลข้าวเปลือก: ภาพตัดไซโล สีเมล็ดตามความชื้น จุดรา และเส้นแนวโน้ม RH
+  เปิดแบบนี้: g19_idea_3.html?team=team19  (หรือพิมพ์ทีมในช่องบนหน้า)
+  ฟัง bento-aiot/<ทีม>/# (บอร์ดส่ง /event เมื่อระดับเปลี่ยน) ส่งคำสั่งเข้า bento-aiot/<ทีม>/cmd
+  broker สาธารณะ ไม่มีรหัสผ่าน ใครก็อ่านและสั่งได้ ห้ามส่งของลับ
+
+  ===== ส่วนไหนมาจากโค้ดเริ่มต้น / ส่วนไหนทีมทำเอง =====
+  มาจากโค้ดเริ่มต้น (web/idea_3.html): ภาพตัดไซโล จุดรา กราฟแนวโน้ม ป้ายเตือน ปุ่ม ack / t_hi / CSV
+  ทีมทำเอง (ฝั่งเว็บ รองรับบอร์ดข้อ 3 ใน g19_silo.py):
+    1) แสดง "ตัดเตือนผิด n ครั้ง" จากคีย์ filtered ที่บอร์ดส่งมา (ค่าพุ่งชั่วคราวที่บอร์ดกรองทิ้ง)
+    2) ใช้เกณฑ์ RH จริงของบอร์ดจากคีย์ rh_hi (เส้นแดงบนภาพไซโลและกราฟขยับตามบอร์ด)
+       แทนค่าตายตัวในตาราง CROPS
+    3) ปุ่มตั้งเกณฑ์ความชื้นจากมือถือ ส่ง {"cmd":"set","rh_hi":N} (บอร์ดต้องรองรับ rh_hi)
+    4) CSV เพิ่มคอลัมน์ rh_hi และ filtered
+  หมายเหตุ: บอร์ดส่ง event เฉพาะตอนระดับเปลี่ยน ค่า filtered จึงอัปเดตเมื่อมี event ใหม่เข้ามา
+-->
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffe3ee">
+<title>ไซโลข้าวเปลือก</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffe3ee; --bg2: #ffd0e3; --card: #fff8fb; --line: #f5bfd3; --ink: #4a2433; --dim: #8a5a6e;
+    --accent: #d6336c; --accent-ink: #ffffff; --alarm-ink: #ffffff; --shadow: 0 6px 18px rgba(214, 51, 108, .14);
+    --grain: #e3a72f; --ok: #3f8f5b; --warn: #d9731f; --bad: #c8283c; --steel: #c9aab8;
+    --font: system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", "Sarabun", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #2a1320; --bg2: #3a1a2c; --card: #3a1d2e; --line: #6e3a55; --ink: #ffe8f1; --dim: #dcaec4;
+      --accent: #ff7eb6; --accent-ink: #3a1020; --alarm-ink: #3a0a12; --shadow: 0 6px 18px rgba(0, 0, 0, .35);
+      --grain: #f0c060; --ok: #8ed1a0; --warn: #ffb36b; --bad: #ff7a85; --steel: #8a6a7a; }
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { margin: 0; min-height: 100vh; color: var(--ink); font-family: var(--font); line-height: 1.5;
+    background: var(--bg); background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%) fixed; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 18px 16px 24px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; }
+  h1 { margin: 0; font-size: 24px; color: var(--accent); letter-spacing: .2px; }
+  h2 { margin: 0 0 8px; font-size: 16px; color: var(--accent); }
+  .sub { margin: 0; color: var(--dim); font-size: 14px; }
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 16px;
+    min-width: 0; box-shadow: var(--shadow); }
+  .rh { font-size: 56px; font-weight: 800; line-height: 1; }
+  .rh small { font-size: 18px; font-weight: 600; color: var(--dim); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 15px; margin-top: 12px;
+    padding-top: 10px; border-top: 1px dashed var(--line); }
+  .kv dt { color: var(--dim); }
+  .kv dd { margin: 0; font-weight: 600; }
+  #alarm { display: none; margin-top: 14px; padding: 14px 16px; border-radius: 20px; background: var(--bad);
+    color: var(--alarm-ink); font-weight: 700; box-shadow: 0 6px 18px rgba(200, 40, 60, .35); }
+  #alarm.on { display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  button, input { font: inherit; min-height: 42px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  button { cursor: pointer; transition: transform .08s ease, box-shadow .15s ease; }
+  button:hover { box-shadow: 0 3px 10px rgba(214, 51, 108, .22); }
+  button:active { transform: translateY(1px); }
+  button.main { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  input[type=number] { width: 84px; }
+  #conn { padding: 4px 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+  #trendNote { font-size: 14px; }
+  .hint { margin: 10px 0 0; font-size: 13px; color: var(--dim); }
+  footer { margin: 20px 0 8px; color: var(--dim); font-size: 13px; text-align: center; }
+  @media (max-width: 640px) { .layout { grid-template-columns: 1fr; } #siloCard svg { height: 220px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>ไซโลข้าวเปลือก</h1>
+    <p class="sub">ความชื้นในไซโล เวลาเสี่ยงรา และแนวโน้ม</p>
+  </div>
+  <div class="row">
+    <input id="team" size="10" placeholder="team19" aria-label="ชื่อทีม">
+    <button id="go">ต่อ</button>
+    <span id="conn" class="sub">ยังไม่ต่อ</span>
+  </div>
+</header>
+<div id="alarm" role="alert"></div>
+
+<div class="layout">
+  <section class="card" id="siloCard">
+    <h2>ภาพตัดไซโล</h2>
+    <svg viewBox="0 0 160 260" width="100%" height="280" aria-label="ไซโล">
+      <defs><clipPath id="body"><rect x="30" y="50" width="100" height="190" rx="6"/></clipPath></defs>
+      <polygon points="24,52 80,8 136,52" fill="var(--steel)"/>
+      <rect x="30" y="50" width="100" height="190" rx="6" fill="none" stroke="var(--steel)" stroke-width="4"/>
+      <g clip-path="url(#body)">
+        <rect id="fill" x="30" y="120" width="100" height="120" fill="var(--grain)"/>
+        <g id="mold"></g>
+      </g>
+      <line id="hiLine" x1="22" x2="138" y1="0" y2="0" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 4"/>
+      <text id="hiTxt" x="140" y="0" font-size="10" fill="var(--bad)">70%</text>
+      <rect x="40" y="240" width="10" height="16" fill="var(--steel)"/><rect x="110" y="240" width="10" height="16" fill="var(--steel)"/>
+    </svg>
+    <p class="sub">ระดับเมล็ดในภาพ = ความชื้น % (เส้นแดง = เกณฑ์ราขึ้น)</p>
+  </section>
+
+  <section class="card">
+    <h2>ความชื้นตอนนี้</h2>
+    <div class="rh"><span id="rh">--</span><small> %RH</small></div>
+    <div id="mood" class="sub">รอข้อความจากบอร์ด</div>
+    <dl class="kv">
+      <dt>เวลาเสี่ยงรา</dt><dd id="wet">-</dd>
+      <dt>สูงสุดตั้งแต่เริ่ม</dt><dd id="rhmax">-</dd>
+      <dt>อุณหภูมิ</dt><dd id="temp">-</dd>
+      <dt>เมล็ด</dt><dd id="crop">-</dd>
+      <dt>เกณฑ์ชื้น</dt><dd id="rhhiTxt">-</dd>
+      <dt>ตัดเตือนผิด</dt><dd id="filtered">-</dd>
+    </dl>
+    <p class="hint">ตัดเตือนผิด = ค่าพุ่งชั่วคราวแล้วกลับปกติก่อนครบเวลายืนยัน บอร์ดจึงไม่เตือน (อัปเดตเมื่อมี event ใหม่)</p>
+    <h2 style="margin-top:14px">แนวโน้ม RH (ทุกครั้งที่ระดับเปลี่ยน)</h2>
+    <svg id="trend" viewBox="0 0 300 90" width="100%" height="90" aria-label="แนวโน้มความชื้น">
+      <line id="trendHi" x1="0" x2="300" y1="27" y2="27" stroke="var(--bad)" stroke-dasharray="4 3"/>
+      <polyline id="trendLine" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points=""/>
+    </svg>
+    <p id="trendNote" class="sub"></p>
+  </section>
+</div>
+
+<section class="card" style="margin-top:12px">
+  <h2>สั่งไซโล</h2>
+  <div class="row">
+    <button class="main" id="ack">รับทราบ เปิดพัดลมแล้ว (ack)</button>
+    <button id="csv">ดาวน์โหลด CSV</button>
+  </div>
+  <div class="row">
+    <input id="rhin" type="number" min="16" max="90" value="50" aria-label="rh_hi"><button id="setrh">ตั้งเกณฑ์ชื้น rh_hi (%)</button>
+    <input id="thi" type="number" min="16" max="45" value="35" aria-label="t_hi"><button id="set">ตั้งเกณฑ์ร้อน t_hi</button>
+  </div>
+  <p class="sub" id="cmdMsg"></p>
+</section>
+
+<footer>
+  <p>ต่อยอดหน้านี้เองได้ (แก้ด้วยตัวเองหรือ vibe coding โดยวาง s2/app/MQTT_CONTRACT_th.md ให้ AI ก่อน)</p>
+  <p>ส่วนที่ทีมต่อยอดเองอยู่ในคอมเมนต์หัวไฟล์</p>
+</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.16.0/dist/mqtt.min.js"
+        integrity="sha384-9WWboT9UtuPFRlOLq4FygQkcJxzYcpz8SXGkNyCEXM+44n14xzjNlrRKYZwuF/A6" crossorigin="anonymous"></script>
+<script>
+const BROKER_URL = "wss://broker.hivemq.com:8884/mqtt";
+const ROOT = "bento-aiot";
+const LEVEL_TH = ["แห้งดี", "เริ่มชื้น", "เสี่ยงรา"];
+const LEVEL_VAR = ["--ok", "--warn", "--bad"];
+const ALERT_TH = { ok: "แห้งดี", cold: "ไซโลเย็น", hot: "ไซโลร้อน", dry: "แห้งไป", wet: "ชื้นเกิน" };
+// ชื่อไทยและ RH สูงของแต่ละเมล็ด ตรงกับ CROPS ในบอร์ด (ใช้เมื่อบอร์ดไม่ส่ง rh_hi)
+const CROPS = { paddy: ["ข้าวเปลือก", 70], seed: ["เมล็ดพันธุ์", 65], corn: ["ข้าวโพด", 70] };
+const $ = (id) => document.getElementById(id);
+const rows = [], history_rh = [];
+let client = null, team = "", rhHi = 70, hiFromBoard = false;
+
+function num(v) { return (typeof v === "number" && Number.isFinite(v)) ? v : null; }
+function str(v, max) { return typeof v === "string" ? v.slice(0, max || 40) : ""; }
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function okTeam(t) { return /^team[0-9a-z_]{2,16}$/i.test(t) && t !== "teamXX" && t !== "team00"; }
+function alertTh(code) { return str(code, 60).split("+").map((c) => ALERT_TH[c] || c).join(" + "); }
+function setConn(t, ok) { $("conn").textContent = t; $("conn").style.color = cssVar(ok ? "--ok" : "--warn"); }
+function siloY(rh) { return 240 - Math.max(0, Math.min(100, rh)) * 1.9; }    // 0-100 % -> y ในตัวไซโล
+
+function drawHi() {
+  const y = siloY(rhHi);
+  $("hiLine").setAttribute("y1", y); $("hiLine").setAttribute("y2", y);
+  $("hiTxt").setAttribute("y", y - 3); $("hiTxt").textContent = rhHi + "%";
+  const ty = 90 - rhHi * 0.9;
+  $("trendHi").setAttribute("y1", ty); $("trendHi").setAttribute("y2", ty);
+  $("rhhiTxt").textContent = rhHi + " %" + (hiFromBoard ? " (จากบอร์ด)" : "");
+}
+
+function drawSilo(rh, level) {
+  const y = siloY(rh);
+  $("fill").setAttribute("y", y.toFixed(1));
+  $("fill").setAttribute("height", (240 - y).toFixed(1));
+  $("fill").setAttribute("fill", level === 1 ? "var(--warn)" : "var(--grain)");   // เสี่ยงรา = เมล็ดสีเดิม + จุดรา
+  const g = $("mold");
+  while (g.firstChild) g.firstChild.remove();
+  if (level < 2) return;
+  for (let i = 0; i < 9; i++) {                 // จุดราสุ่มในเนื้อเมล็ด เมื่อเสี่ยงรา
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", (38 + Math.random() * 84).toFixed(1));
+    c.setAttribute("cy", (y + 8 + Math.random() * Math.max(4, 228 - y)).toFixed(1));
+    c.setAttribute("r", (2 + Math.random() * 4).toFixed(1));
+    c.setAttribute("fill", "#2f4f2f"); c.setAttribute("opacity", "0.7");
+    g.appendChild(c);
+  }
+}
+
+function drawTrend() {
+  const pts = history_rh.slice(-20);
+  const step = pts.length > 1 ? 300 / (pts.length - 1) : 0;
+  $("trendLine").setAttribute("points", pts.map((v, i) => (i * step).toFixed(1) + "," + (90 - v * 0.9).toFixed(1)).join(" "));
+  const n = pts.length;
+  if (n >= 3 && pts[n - 1] > pts[n - 2] && pts[n - 2] > pts[n - 3]) {
+    $("trendNote").textContent = "ชื้นขึ้นต่อเนื่อง 3 ครั้งล่าสุด: ตรวจหลังคาและพัดลมไซโล";
+    $("trendNote").style.color = cssVar("--warn");
+  } else { $("trendNote").textContent = n ? "ยังไม่เห็นแนวโน้มชื้นขึ้นต่อเนื่อง" : ""; $("trendNote").style.color = ""; }
+}
+
+function mmss(sec) { return Math.floor(sec / 60) + " นาที " + (sec % 60) + " วินาที"; }
+
+// กฎฝั่งแอป: เสี่ยงรา (level 2) = ป้ายแดงค้าง
+function alarm(on, why) {
+  $("alarm").className = on ? "on" : "";
+  $("alarm").textContent = on ? "เสี่ยงรา: " + why + "  เปิดพัดลมไซโล แล้วกดรับทราบ" : "";
+  if (on && navigator.vibrate) navigator.vibrate([300, 150, 300]);
+}
+
+function onEvent(topic, d) {
+  const level = num(d.level);
+  if (level === null || level < 0 || level > 2) return;
+  const rh = num(d.rh), t = num(d.temp_c), wet = num(d.wet_s), rmax = num(d.rh_max), sun = num(d.sun_c);
+  const rhHiB = num(d.rh_hi), flt = num(d.filtered);
+  const crop = str(d.crop, 20);
+  // เกณฑ์ RH: ใช้ค่าจริงจากบอร์ดก่อน ถ้าบอร์ดไม่ส่งค่อยใช้ตาราง CROPS
+  if (rhHiB !== null && rhHiB > 0 && rhHiB <= 100) {
+    if (rhHiB !== rhHi || !hiFromBoard) { rhHi = rhHiB; hiFromBoard = true; drawHi(); }
+  } else if (!hiFromBoard && CROPS[crop] && CROPS[crop][1] !== rhHi) { rhHi = CROPS[crop][1]; drawHi(); }
+  $("crop").textContent = CROPS[crop] ? CROPS[crop][0] : (crop || "-");
+  $("filtered").textContent = flt === null ? "-" : flt + " ครั้ง";
+  const why = alertTh(d.alert);
+  if (rh !== null) { $("rh").textContent = rh.toFixed(0); drawSilo(rh, level); history_rh.push(rh); drawTrend(); }
+  $("rh").style.color = cssVar(LEVEL_VAR[level]);
+  $("mood").textContent = LEVEL_TH[level] + (level ? ": " + why : "");
+  $("mood").style.color = cssVar(LEVEL_VAR[level]);
+  $("wet").textContent = wet === null ? "-" : mmss(wet);
+  $("rhmax").textContent = rmax === null ? "-" : rmax.toFixed(1) + " %";
+  $("temp").textContent = t === null ? "-" : t.toFixed(1) + " C" + (sun ? " (แดด +" + sun + ")" : "");
+  rows.push([new Date().toISOString(), topic, level, str(d.alert, 60), t, rh, sun, wet, rmax, rhHiB, flt]);
+  alarm(level === 2, why);
+}
+
+function onMessage(topic, payload) {
+  let d = null;
+  try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+  if (!d || typeof d !== "object" || Array.isArray(d)) return;
+  if (topic.endsWith("/cmd")) { if (d.cmd === "ack") alarm(false); return; }
+  if (topic.endsWith("/event")) onEvent(topic, d);
+}
+
+function connect() {
+  team = $("team").value.trim();
+  if (!okTeam(team)) { setConn("ใส่ทีม เช่น team19", false); return; }
+  history.replaceState(null, "", "?team=" + encodeURIComponent(team));
+  if (client) client.end(true);
+  client = mqtt.connect(BROKER_URL, { clientId: "idea3-web-" + Math.random().toString(16).slice(2, 10), connectTimeout: 20000 });
+  setConn("กำลังต่อ...", false);
+  client.on("connect", () => { setConn("ต่อแล้ว " + team, true); client.subscribe(ROOT + "/" + team + "/#"); });
+  client.on("close", () => setConn("หลุด กำลังต่อใหม่...", false));
+  client.on("message", onMessage);
+}
+
+function toBoard(obj) {
+  if (!client || !client.connected) { $("cmdMsg").textContent = "ยังไม่ได้ต่อ broker"; return; }
+  client.publish(ROOT + "/" + team + "/cmd", JSON.stringify(obj));
+  $("cmdMsg").textContent = "ส่งแล้ว: " + JSON.stringify(obj);
+}
+
+function csvCell(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function downloadCsv() {
+  if (!rows.length) { $("cmdMsg").textContent = "ยังไม่มีข้อมูลให้ดาวน์โหลด"; return; }
+  const head = ["time", "topic", "level", "alert", "temp_c", "rh", "sun_c", "wet_s", "rh_max", "rh_hi", "filtered"];
+  const text = [head.join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\r\n");
+  const url = URL.createObjectURL(new Blob(["\uFEFF" + text], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = "silo_" + team + ".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+$("go").addEventListener("click", connect);
+$("ack").addEventListener("click", () => toBoard({ cmd: "ack" }));
+$("set").addEventListener("click", () => {
+  const v = Number($("thi").value);
+  if (!Number.isInteger(v) || v < 16 || v > 45) { $("cmdMsg").textContent = "t_hi ต้องเป็นเลขเต็ม 16-45"; return; }
+  toBoard({ cmd: "set", t_hi: v });
+});
+$("setrh").addEventListener("click", () => {
+  const v = Number($("rhin").value);
+  if (!Number.isInteger(v) || v < 16 || v > 90) { $("cmdMsg").textContent = "rh_hi ต้องเป็นเลขเต็ม 16-90"; return; }
+  toBoard({ cmd: "set", rh_hi: v });
+});
+$("csv").addEventListener("click", downloadCsv);
+
+drawHi();
+team = new URLSearchParams(location.search).get("team") || "";
+$("team").value = team;
+if (okTeam(team)) connect(); else setConn("ใส่ทีมแล้วกด ต่อ", false);
+</script>
+</body>
+</html>
